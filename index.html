@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BART Real-Time SSF Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f1f5f9;
+        }
+
+        .bart-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .pulse {
+            animation: pulse-animation 2s infinite;
+        }
+
+        @keyframes pulse-animation {
+            0 { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        .departure-row:not(:last-child) {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .eta-leaving {
+            color: #f87171;
+            font-weight: 800;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
+                    <span class="bg-blue-600 px-3 py-1 rounded text-sm uppercase">SSF</span>
+                    South San Francisco
+                </h1>
+                <p class="text-slate-400 mt-1">Real-time Departure Estimates</p>
+            </div>
+            <div id="last-updated" class="text-sm text-slate-500 font-mono">
+                Updating...
+            </div>
+        </header>
+
+        <!-- Directions Container -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <!-- Northbound Section -->
+            <section id="northbound" class="bart-card rounded-2xl overflow-hidden shadow-2xl">
+                <div class="bg-slate-800/50 px-6 py-4 border-b border-white/10 flex justify-between items-center">
+                    <h2 class="text-lg font-bold flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+                        Northbound
+                    </h2>
+                    <span class="text-xs text-slate-400 uppercase tracking-widest">To SF / Richmond</span>
+                </div>
+                <div id="north-list" class="p-2 min-h-[200px]">
+                    <!-- Data injected here -->
+                    <div class="p-8 text-center text-slate-500 italic">Fetching schedule...</div>
+                </div>
+            </section>
+
+            <!-- Southbound Section -->
+            <section id="southbound" class="bart-card rounded-2xl overflow-hidden shadow-2xl">
+                <div class="bg-slate-800/50 px-6 py-4 border-b border-white/10 flex justify-between items-center">
+                    <h2 class="text-lg font-bold flex items-center gap-2">
+                        <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                        Southbound
+                    </h2>
+                    <span class="text-xs text-slate-400 uppercase tracking-widest">To SFO / Millbrae</span>
+                </div>
+                <div id="south-list" class="p-2 min-h-[200px]">
+                    <!-- Data injected here -->
+                    <div class="p-8 text-center text-slate-500 italic">Fetching schedule...</div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Footer Info -->
+        <footer class="mt-12 text-center text-slate-600 text-sm">
+            <p>Data provided by BART Real-Time API. Refreshes every 60 seconds.</p>
+            <div id="error-box" class="hidden mt-4 p-3 bg-red-900/30 text-red-400 rounded-lg border border-red-800/50"></div>
+        </footer>
+    </div>
+
+    <script>
+        const STATION_ABBR = 'SSAN'; // South San Francisco
+        const API_KEY = 'MW9S-E7SL-26DU-VV8V'; // Public BART API key
+        const REFRESH_INTERVAL = 60000; // 1 minute
+
+        async function fetchBartData() {
+            const url = `https://api.bart.gov/api/etd.aspx?cmd=etd&orig=${STATION_ABBR}&key=${API_KEY}&json=y`;
+            const errorBox = document.getElementById('error-box');
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const data = await response.json();
+                renderDashboard(data.root.station[0]);
+                
+                errorBox.classList.add('hidden');
+                document.getElementById('last-updated').innerText = `LAST UPDATED: ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                console.error('Fetch Error:', error);
+                errorBox.innerText = `Error: Unable to fetch live data. Please check your connection.`;
+                errorBox.classList.remove('hidden');
+            }
+        }
+
+        function formatDepartureTime(minutesStr) {
+            const now = new Date();
+            const minutes = minutesStr === 'Leaving' ? 0 : parseInt(minutesStr);
+            if (isNaN(minutes)) return null;
+            
+            const departureDate = new Date(now.getTime() + minutes * 60000);
+            return departureDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function renderDashboard(stationData) {
+            const northList = document.getElementById('north-list');
+            const southList = document.getElementById('south-list');
+            
+            let northHtml = '';
+            let southHtml = '';
+
+            if (!stationData.etd || stationData.etd.length === 0) {
+                const emptyMsg = '<div class="p-8 text-center text-slate-500">No scheduled departures found.</div>';
+                northList.innerHTML = emptyMsg;
+                southList.innerHTML = emptyMsg;
+                return;
+            }
+
+            // Organize departures by direction
+            stationData.etd.forEach(destination => {
+                destination.estimate.forEach(train => {
+                    const exactTime = formatDepartureTime(train.minutes);
+                    const row = `
+                        <div class="departure-row p-4 flex justify-between items-center hover:bg-white/5 transition-colors">
+                            <div class="flex items-center gap-4">
+                                <div class="w-3 h-3 rounded-full" style="background-color: ${train.hexcolor}"></div>
+                                <div>
+                                    <div class="font-bold text-white text-lg leading-tight">${destination.destination}</div>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <span class="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded font-mono">${exactTime || '--:--'}</span>
+                                        <span class="text-xs text-slate-500 uppercase font-semibold">${train.length}-car</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black ${train.minutes === 'Leaving' ? 'eta-leaving pulse' : 'text-blue-100'}">
+                                    ${train.minutes === 'Leaving' ? 'LEAVING' : train.minutes}
+                                    <span class="text-sm font-normal text-slate-400 ml-1">${train.minutes === 'Leaving' ? '' : 'min'}</span>
+                                </div>
+                                <div class="text-[10px] text-slate-500 uppercase tracking-tighter">Platform ${train.platform}</div>
+                            </div>
+                        </div>
+                    `;
+
+                    if (train.direction === 'North') {
+                        northHtml += row;
+                    } else if (train.direction === 'South') {
+                        southHtml += row;
+                    }
+                });
+            });
+
+            // Handle empty directions
+            northList.innerHTML = northHtml || '<div class="p-8 text-center text-slate-500 italic text-sm">No northbound trains currently estimated.</div>';
+            southList.innerHTML = southHtml || '<div class="p-8 text-center text-slate-500 italic text-sm">No southbound trains currently estimated.</div>';
+        }
+
+        // Initial call and set interval
+        fetchBartData();
+        setInterval(fetchBartData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>
